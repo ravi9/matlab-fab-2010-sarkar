@@ -1,0 +1,191 @@
+/*;;;*************************************************************************
+;;; Software by Sudeep Sarkar (sarkar@lidokey.csee.usf.edu)
+;;; (was at)
+;;; Signal Analysis and Machine Perception Laboratory
+;;; Department of Electrical Engineering
+;;; The Ohio State University, Columbus
+;;;
+;;; (is at)
+;;; Computer Science and Engg.
+;;; University of South Florida
+;;; Tampa, FL 33620
+;;;
+;;; (c) 1994 The Ohio State University, University of South Florida
+;;;  
+;;; Use, or copying without permission prohibited.
+;;;
+;;;                    PERMISSION TO USE
+;;; 
+;;; In transmitting this software, permission to 
+;;; use is hereby granted.  This software may be copied for archival
+;;; and backup purposes only.  This software may not be transmitted
+;;; to a third party without prior permission of the copyright holder.
+;;; This permission may be granted only by Prof. Kim L. Boyer of 
+;;; The Ohio State University or by Prof. Sudeep Sarkar of University
+;;; of South Florida.  Acknowledgment as appropriate is respectfully requested.
+;;;
+;;;     10 August 1994, Tampa Florida
+;;;     Sudeep Sarkar: sarkar@lidokey.csee.usf.edu (813)-974-2113
+;;;     Kim L. Boyer:  kim@ee.eng.ohio-state.edu (614) 292-7947
+;;;
+;;; For Reprints, Tech. reports contact Prof. Boyer or Prof. Sarker
+;;; through email or otherwise. 
+;;;
+
+
+
+*****************************************************************************
+
+This is an integrated piece of software to perform low level (edge)
+processing of an image with an X window interface using the XVIEW
+toolkit. 
+
+
+To compile, type "make". You will need XVIEW toolkit. We have used the
+gcc (version 2.5.8) compiler for our experiments. 
+
+
+It incorporates the following capabilities: edge detection, edge
+linking, edge focusing, and constant curvature edge segmentation.
+
+Edge Detection:
+---------------
+This implements the Optimal Zero Crossing edge Operator (OZCO)
+discussed in
+
+"Optimal Infinite Impulse response zero crossing based edge
+ detectors, by S. Sarkar and K. L. Boyer, CVGIP, Sept 1991, vol 54, no 2, 
+ pp 224--243."
+
+The development of the operator follows Canny's analysis but is
+optimized to mark edges as zero crossings. Also, because of OZCO's
+digital recursive filter implementation it is faster. The edge
+detector has a scale associated with it. Edges at high scales tend to
+be fewer and coarser and at low scales we have the opposite effect.
+
+
+Edge Linking:
+-------------
+  All the edgels (edge pixel elements) are linked into edge chains.
+For each edgel in addition to the location we store a set of local
+photometric attributes (see the struct c_element in header.h for
+details). This step is performed along with Edge Detection.
+  
+  The user can interactively threshold the edges based on magnitude
+using the threshold slider in the main panel.
+
+Edge Focusing:
+-------------
+  This parts imparts the ability to focus edges detected at coarse
+scales to those at fine scales. The algorithm is described in
+
+  "Tissue Boundary Refinement in Magnetic Resonance Images Using 
+   Contour-Based Scale Space Matching by S. V. Raman, S. Sarkar 
+   and K. L. Boyer, IEEE Transactions on Medical Imaging,
+   June 1991, vol 10, no 2, pp 109--121."
+
+This paper discusses how to "focus" the edges at a coarse scale to
+those in fine scale and get rid of the fine level "junk" in the
+process. The algorithm discussed in the paper focusses whole edge
+chains (called contour based focusing) . However, in our program we
+have an option of focusing contant curvature segments (called segment
+based focusing) instead of the whole edge chain. 
+
+Contour Segmentation:
+---------------------
+ This part segments the edge chains into segments of constant
+curvature: straight lines and arcs. 
+
+The algorithm opts for the best global parsing of an edge chain. The
+criteria for best fit is the total mean square fit error of the
+segments.  This error is a function of the number of segments and the
+fit error of each of the segments. The "best" segmentation has the
+minimum possible number of segments and minimum total error. Note that
+we can achieve zero total error by considering each pixel to be a
+segment! On the other hand if we consider the whole edge chain as one
+segment then we get the largest possible error.
+ 
+To start off the segmentation process, we need a set of candidate
+segmenting points. There are various ways of selecting these. We
+recursively pick the farthest point from the straight line joining the
+end points of the chain. These candidate segmenting points
+oversegments the edge chain. We pick a subset of these in the
+following manner. The candidate points form the nodes of a graph and
+the links between the nodes denote the fit error of a constant
+curvature segment between the corresponding points. The minimal path
+between the nodes representing the endpoints of the edge chain
+constitutes the optimal segmentation.
+======================================================================
+
+
+INPUT:
+------
+The input to the block is an image file in the following format:
+
+          The first two lines has the number of columns and number
+          of rows, respectively, in ASCII. The rest of the file
+          is the row scanned image stored as 8 bit per pixel.
+
+OUTPUT:
+-------
+The outputs are: 
+
+1.  The default edge image called img_file.edge with edge marked by
+    pixel value of 60 and constant curvature breakpoints by 0. 
+    The background is 255.   
+
+2.  List of attributed constant curvature segments called 
+    img_file.atts in the following format:
+
+The  format of img_file.atts is LISP compatible. 
+
+file:           (segment1 ... segmenti ... segmentn)
+segmenti:        (id# attribute_list xy_list)
+id#:             an integer identity number 
+attribute_list:  (x_center y_center radius fit_error start_pt end_pt
+	          gray_slope 0.0000 mag+ width+ mag- width- 
+	          av_gradient_dir curvature centroid st_slope end_slope)
+xy_list:         ((y1 x1) .... (yi xi) ... (yn xn))
+
+x_center/y_center/radius: parameter of fitted the constant curvature
+                          segment. if the fitted segment is a straight
+	                  line then radius = 99999.0 and x_center & 
+	                  y_center are the slope and intercept of the
+	                  fiited line.
+fit_error: constant curvature fit error
+start_pt: (y_start  x-start) starting point of the constant curvature
+	  segment.
+end_pt:   (y_end x_end) ending point of the constant curvature segment.
+gray_slope: Average gray level slope along the edge segment.
+0.0000:   a dummy paramter...is here for historical reasons
+          (compatibility with Subha's algorithms).
+mag+/mag-: are the magnitudes of the first extrema of the OZCO
+           convolved output to either side of the zero crossing. There
+	   a measure of the gray level behavior on either sides of the
+	   edge segment. 
+width+/width-: are the distance to the above mentioned extrema from
+           the zero crossing. 
+av_gradient_dir: average local image gradient direction along the edge
+	         segment; stored as a floating point;
+curvature:    curvature of the fitted constant curvature segment, 
+	      measured using the gray level edge gradient value of OZCO
+centroid:  (y_cen x_cen) centroid of the edge segment.
+st_slope:  slope of the tangent to the curve at the starting pt.
+end_slope: slope of the tangent to the curve at the ending pt.
+
+========================================================================
+***********************************************************************
+DISCLAIMER
+   We are not responsible for any damages, material or otherwise,
+created by the use/handling of this software. 
+
+***********************************************************************
+REQUEST
+   We have tried to test the software as throughly as possible.
+However, we realize that there might still be bugs. Hence, the user is
+requested to inform us of any bugs which he/she runs into. We will try
+to correct it, as soon as possible.
+
+***********************************************************************
+
+

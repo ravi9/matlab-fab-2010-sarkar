@@ -1,0 +1,38 @@
+function [sbest ebest] = iquadprog (A, kmax)
+% Optimizes x'*A*x/(x'x) where x is a vector of 0 and 1
+% pattern after pseudo code for simulated annealing on wikipedia
+
+[V, D] = eigs(A);
+diag(D)
+N = size(A, 1);
+s = single(abs(V(:,1)) >= (1/(N))); e = (s'*A*s)./(s'*s); // Initial state, energy.
+sbest = s; ebest = e; // Initial "best" solution
+T0 = e; k = 0;
+while k < kmax
+    snew = s; i = randi(N); snew(i) = 1 - snew(i); // Pick some neighbour, flip the state of the components
+    enew = (snew'*A*snew)./(snew'*snew);
+    if (enew > ebest) 
+        sbest = snew; ebest = enew; // Is this a new best?
+    end;
+    T = T0*k/kmax;
+    if (exp((enew ? e)/T) > rand) 
+        s = snew; e = enew;
+    end;
+    k = k + 1;
+    
+    
+s ? s0; e ? E(s)                                
+sbest ? s; ebest ? e                            
+k ? 0                                           // Energy evaluation count.
+while k < kmax and e > emax                     // While time left & not good enough:
+  snew ? neighbour(s)                           // Pick some neighbour.
+  enew ? E(snew)                                // Compute its energy.
+  if enew < ebest then                          // Is this a new best?
+    sbest ? snew; ebest ? enew                  // Save 'new neighbour' to 'best found'.
+  if P(e, enew, temp(k/kmax)) > random() then   // Should we move to it?
+    s ? snew; e ? enew                          // Yes, change state.
+  k ? k + 1                                     // One more evaluation done
+return sbest                                    // Return the best solution found.
+
+
+

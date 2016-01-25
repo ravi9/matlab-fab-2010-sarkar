@@ -1,0 +1,28 @@
+function y = VisualizeConfiguration (X, Y, Lines)
+
+close all; figure;
+selected = -1;
+while (1 == 1)
+    subplot(1,2,1);
+    plot(X, Y, 'o'); hold on;
+    if (selected > 0) plot(x, y, 'ro'); end;
+    Ou
+    for i=1:length(Lines)
+        for (j=1:Lines(i).length)
+            if (i==selected)
+                OutputImage(Lines(i).y(j), Lines(i).x(j), 1) = 255;
+                OutputImage(Lines(i).y(j), Lines(i).x(j), 2) = 0;
+                OutputImage(Lines(i).y(j), Lines(i).x(j), 3) = 0;
+            else
+                OutputImage(Lines(i).y(j), Lines(i).x(j), 1) = 0;
+                OutputImage(Lines(i).y(j), Lines(i).x(j), 2) = 255;
+                OutputImage(Lines(i).y(j), Lines(i).x(j), 3) = 0;
+            end;
+        end;
+    end;
+    subplot(1,2,2); imagesc(OutputImage);
+
+    [x y] = ginput(1);
+    d = (X-x).^2 + (Y-y).^2;
+    [mind selected] = min(d)
+end;

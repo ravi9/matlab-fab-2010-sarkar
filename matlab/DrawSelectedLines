@@ -1,0 +1,9 @@
+function OutputImage = DrawSelectedLines (Lines, Layout, selected)
+
+N = length(Layout.indices);
+for i=1:N
+    for j=1:Lines(Layout.indices(i)).length
+        OutputImage(Lines(Layout.indices(i)).y(j), Lines(Layout.indices(i)).x(j)) = 255*(1-selected(i));
+    end;
+end;
+OutputImage = 255 - OutputImage;

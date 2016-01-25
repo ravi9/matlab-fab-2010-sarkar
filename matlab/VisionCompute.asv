@@ -1,0 +1,37 @@
+function y = VisionCompute (Lines, Layout)
+
+X = Layout.X; Y = Layout.Y;
+if (size(X, 2) ~= 1) 
+    X = X'; Y = Y';
+end;
+N = length(X);
+Input = -10*ones(N, 1);
+
+State0 = (abs(NanodiskArray (X, Y, 50, 20, Input, 0.25*pi*ones(N,1)) - pi/4)); 
+figure; colormap(gray); imagesc(DrawSelectedLines (Lines, Layout, State0)); pause;
+State1 = (abs(NanodiskArray (X, Y, 50, 20, Input, -0.25*pi*ones(N,1)) + pi/4));
+figure; colormap(gray); imagesc(DrawSelectedLines (Lines,  Layout, State0)); pause;
+State2 = (abs(NanodiskArray (X, Y, 50, 20, Input, -0.75*pi*ones(N,1)) + 0.75*pi));
+figure; colormap(gray); imagesc(DrawSelectedLines (Lines,  Layout, State0)); pause;
+State3 = (abs(NanodiskArray (X, Y, 50, 20, Input, 0.75*pi*ones(N,1))  - 0.75*pi));
+figure; colormap(gray); imagesc(DrawSelectedLines (Lines,  Layout, State0)); pause;
+
+close all; 
+plot(State0, 'r'); hold on; plot(State1, 'b'); 
+plot(State2, 'g');  plot(State3, 'b'); 
+
+%%%%--------------------------------------------
+function OutputImage = DrawSelectedLines (Lines, Layout, selected)
+
+N = length(Layout.indices);
+for i=1:N
+    for j=1:Lines(Layout.indices(i)).length
+ %       OutputImage(Lines(Layout.indices(i)).y(j), Lines(Layout.indices(i)).x(j)) = 255*(1-selected(i));
+%         if (selected (i) == 1)
+%             OutputImage(Lines(Layout.indices(i)).y(j), Lines(Layout.indices(i)).x(j)) = 255;
+%         else
+%             OutputImage(Lines(Layout.indices(i)).y(j), Lines(Layout.indices(i)).x(j)) = 120;
+%         end;
+    end;
+end;
+OutputImage = 512 - OutputImage;

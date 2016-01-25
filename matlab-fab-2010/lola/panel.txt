@@ -1,0 +1,82 @@
+1. Image File Name: 
+-------------------
+   The input image format is the following:
+
+          The first two lines has the number of columns and number
+          of rows, respectively, in ASCII. The rest of the file
+          is the row scanned image stored as 8 bit per pixel.
+
+2. Edge File Name Base:
+-----------------------
+   The base for the output file names. There are two outputs: the edge
+map and the list of edge segments. The default name base is the
+image_file_name. So the edge map would be in image_file_name.edge and
+the segments would be in image_file_name.atts
+
+========================================================================
+The following 6 are paramters for edge focusing. 
+
+3. Start Scale: 
+--------------
+It is the coarsest scale of the edge operator to start the focusing
+from.
+
+4. Stop Scale:
+-------------
+This is a paramter for edge focusing. It is the finest desired scale
+in edge focusing. 
+
+     IF YOU GIVE THE SAME VALUE FOR coarse AND fine SCALES THEN IT WILL
+     GIVE YOU EDGES AT THAT SCALE. THIS IS THE WAY TO BYPASS THE
+     FOCUSSING ALGORITHM.
+
+5. Constant Step Focusing:
+-------------------------
+This specifies whether to takes uniformly spaced steps in scale space
+or to dynamically choose the step size depending on the behaviour of
+the edge detector. The default is the latter.
+
+6. Segment Based Focusing:
+--------------------------
+The option is to focus the segments of the edge chain after contour
+segmentation or to focus the whole edge chains themselves. 
+
+
+7. Focusing Similarity Index:
+-----------------------------
+This is a similarity parameter (between 0 and 1) denoting the expected
+amount of similarity between scales. It is used by the focussing
+algorithm to dynamically choose the step size. Typical value is 0.8 -
+0.9.  It is no consequense if the focussing algorithm is bypassed or
+if we are doing constant step focusing.
+
+8. Focusing Step Size:
+----------------------
+This specifies the step size to take in scale space when doing
+constant step edge focusing.
+
+======================================================================
+The following four are contour segmenation paramters:
+9. Minimum Segment Length:
+--------------------------
+The minimum length of the edge chain below which we do not segment.
+
+10. Segmentation Index:
+----------------------
+This controls the degree of segmentation. If this is high we will have
+a large number of segments and if low then we will have a small number
+of segments.
+
+11. Minimum Deviation:
+----------------------
+This is the minimum tolerable deviation of a point from the
+approximating curve. It controls the minimum error of our segmentation.
+
+12. THRESHOLD? (1-Yes)
+13. THRESHOLD VALUE:
+-------------------
+These are to interactively threshold the edge segments or chains. 
+
+
+READ the README file for more information.
+If you still have questions send mail to sarkar@lidokey.csee.usf.edu.

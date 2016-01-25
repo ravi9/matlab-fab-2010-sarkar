@@ -1,0 +1,803 @@
+/**************************************************************
+Contour segmentation code starts here 
+**************************************************************/
+  /*  This code is to segment an edge chain into a combination
+    of straight line and constant curvature segments. The algorithm opts 
+    for the best global parsing of the edge chain. The criteria for 
+    best fit is 
+    (Total mean square fit error of the segments)
+    So, there is a trade off between the number of segments and the
+    minimum possible fit error (ideally zero for an infinite number
+    of segments).
+    
+    To start off the process, it needs a set of candidate segmenting
+    points. There are various ways of selecting these. First would
+    be to pick the points of maximum curvature. Second would be
+    to recursively pick the farthest point from the straight
+    line joining the end points of the chain. We chose the second
+    strategy */
+/***************************************************************************/
+
+#include "header.h"
+static int display_flag = 0;
+
+
+int sense (float x1, float y1, float x2, float y2, float x3, float y3)
+{
+    
+  if (((x1 - x2)*(y3 - y2) - (y1 - y2)*(x3 - x2)) >= 0.0) return (1);
+  else return(-1);
+}
+/**********************************************************/
+float determinant_3x3(float a00, float a01, float a02, float a10, 
+                      float a11, float a12, float a20, float a21, float a22)
+{
+  float a1, a2, a3;
+  
+  a1 = a00 * (a11*a22 - a12*a21);
+  a2 = a01 * (a12*a20 - a10*a22);
+  a3 = a02 * (a10*a21 - a11*a20);
+  /*return ((a00*a11*a22 + a01*a12*a20 + a02*a10*a21) -
+    (a02*a11*a20 + a01*a10*a22 + a00*a12*a21));*/
+  return(a1 + a2+ a3);
+}
+
+/**********************************************************************/
+float get_fit_error_str(Element *edge_chain, int i, int j,
+                        Element **type)
+{
+  /* this functions find the mean squared error of fitting a straight
+     line to the segment between indices i and j*/
+  
+  Element *start, *last, *temp;
+  int k, l, n;
+  double m, c, mu[3][3], e, last_theta, curvature;
+  double m_2, c_2, e_2, m_3, c_3, e_3;
+  
+  (*type) = NULL;
+  element_append(type, 0, 0); element_append(type, 0, 0);
+
+  for (k=0; k< 3; k++)  for (l=0; l < 3; l++) mu[k][l] = 0.0;
+ 
+  /*fprintf(stderr, " [%d %d]", i, j);
+    print_chain(edge_chain);*/
+
+  k = 0; temp = edge_chain; curvature = 0.0; 
+
+  /*while (temp) {
+    if (((i > j) && (k < i) && (k > j)) || ((i < j)) && (k < i))
+    {temp = temp->next; k++;}
+    else if ((i < j) && (k > j)) break;*/
+
+  n = chain_length(edge_chain);   if (i > j) j = j + n;
+  while (k <= j) {
+    if (k < i) {
+      temp = temp->next; k++;
+      if (k == n) temp = edge_chain;
+    }
+    else {
+      if (k == i) start = temp;
+      if (k == j) last = temp;
+      if (k == i) last_theta = temp->grad_dir;
+      else {
+	curvature += (temp->grad_dir-last_theta)*(temp->grad_dir-last_theta);
+	last_theta = temp->grad_dir;
+      }
+      (mu[0][0])++;
+      mu[0][1] += (double) temp->y;
+      mu[0][2] += (double) temp->y * temp->y;
+      mu[1][1] += (double) temp->x * temp->y;
+      mu[1][0] += (double) temp->x;
+      mu[1][2] += ((double) temp->x * temp->y) * temp->y;
+      mu[2][0] += (double) temp->x * temp->x;
+      mu[2][1] += ((double) temp->x * temp->x) * temp->y;
+      mu[2][2] += (double) temp->x * temp->x * temp->y * temp->y;
+      temp = temp->next; k++;
+      if (k == n) temp = edge_chain;
+    }
+  }
+  /*for (k=0; k< 3; k++)  for (l=0; l < 3; l++) 
+    fprintf(stderr, " mu[%d][%d] = %f", k, l, mu[k][l]);*/
+  if (mu[0][0] > 0.0) {
+    mu[1][1] = mu[1][1] / mu[0][0]; mu[1][0] = mu[1][0] / mu[0][0];
+    mu[0][1] = mu[0][1] / mu[0][0]; mu[2][0] = mu[2][0] / mu[0][0];
+    mu[0][2] = mu[0][2] / mu[0][0]; 
+  }
+  /*fprintf(stderr, " %d %d %d %d))", start->x, start->y, last->x, last->y);*/
+  
+   if (fabs((float) (mu[1][1] - mu[1][0]*mu[0][1])) < 0.00001) {
+    m_2 = 999999.0; m_3 = 0.0;
+    c_2 = mu[1][0];/* x intercept*/
+    c_3 = mu[0][1];
+    e_2 = (mu[2][0] + c_2*c_2) - 2*c_2*mu[1][0];
+    e_3 = (mu[0][2] + c_3*c_3) - 2*c_3*mu[0][1];
+  }
+  else {
+    c_2 = ((mu[2][0] - mu[1][0]*mu[1][0] - mu[0][2] + mu[0][1]*mu[0][1])/
+	   (mu[1][1] - mu[1][0]*mu[0][1]));
+    m_2 = (-c_2 + sqrt(c_2 * c_2 + 4))/2;
+    m_3 = (-c_2 - sqrt(c_2 * c_2 + 4))/2;
+
+    c_3 = (mu[0][1] - m_3 * mu[1][0]);
+    c_2 = (mu[0][1] - m_2 * mu[1][0]);
+    
+    e_3 = (mu[0][2] + m_3*m_3*mu[2][0] + c_3*c_3 - 2*m_3*mu[1][1] -
+	   2*c_3*mu[0][1] + 2*m_3*c_3*mu[1][0])/ (m_3*m_3 + 1);
+    
+    e_2 = (mu[0][2] + m_2*m_2*mu[2][0] + c_2*c_2 - 2*m_2*mu[1][1] -
+	   2*c_2*mu[0][1] + 2*m_2*c_2*mu[1][0])/(m_2*m_2 + 1);
+  }
+  if (e_3 < e_2) {
+    c_2 = c_3;
+    e_2 = e_3;
+    m_2 = m_3;
+  }
+  
+  if ((fabs(start->x - last->x) < 0.00001) && 
+      (fabs(start->y - last->y) < 0.00001)) {
+    e = 9999999.0; m = 0.0; c = 0.0;
+  }
+  else {
+    if (fabs(start->x - last->x) < 0.00001) {
+      c = (double) (start->x * last->y - last->x * start->y) / 
+	(last->y - start->y);
+      e = (mu[2][0] + c*c) - 2*c*mu[1][0];
+      m = 999999.0;
+    }
+    else {
+      m = (double) (start->y -  last->y) / (start->x - last->x);
+      c = (double) (start->x * last->y - last->x * start->y) /
+	(start->x - last->x);
+      e = (mu[0][2] + m*m*mu[2][0] +c*c +2*m*c*mu[1][0] 
+	   - 2*m*mu[1][1] - 2*c*mu[0][1])/
+	     (1 + m*m);
+    }
+  }
+  if (e_2 < e) {
+    m = m_2; c = c_2; e = e_2;
+  }
+  (*type)->x = 9999999.0; (*type)->y = 0; 
+  (*type)->next->x = (float) m; (*type)->next->y = (float) c;
+
+
+  if ((e < 0.0) && (e > -0.02)) /* to take care of round offs */
+    e = 0.0;
+  if (e < 0.0) {
+    fprintf(stderr, "\n Negative straight line fit error %f!!!\n", e);
+    e = 0.0;
+  }
+  e = sqrt(mu[0][0] * e);
+
+  return((float) e);
+}
+/**************************************************************************/
+
+float get_fit_error_cir(Element *edge_chain, int i, int j,
+                        Element **type)
+{
+  /* returns the fit error of fitting a circular arc to the
+     segment points indexed between i and j. We consider two fits;
+     (i) centroid is considered as the center of the circle 
+     (ii) the circle constrained to pass through the last points
+     We pick the one with minimum error. It returns the TOTAL error
+     and not the average error
+
+     Have tried using the using the average curvature estimated form the
+     grad_dir's at each point. It did not work that well. */
+
+  Element *start, *last, *temp;
+  int k, len, len2, n;
+
+
+  float radius, xc, yc, x1, y1, x2, y2, r1, r2, x3, y3, d, e, f, scale;
+  float error;
+  float xc_2, yc_2, r_2, len3, error_2, c;
+  double sx, sy, sx2, sy2, sxy, sx3, sx2_y, sy3, sy2_x, a00, a01;
+  double a02, a10, a11, a12, a20, a21, a22, b0, b1, b2, b3;
+  double ia00, ia01, ia02, ia10, ia11, ia12, ia20, ia21, ia22, det;
+
+  /* sets up the blanks for the type of fit (r, xc, yc) */
+  (*type) = NULL;
+  element_append(type, 0, 0); element_append(type, 0, 0);
+
+  /* get the start and the end points as we are going to restrict the
+   circle to pass through them */
+  k = 0; temp = edge_chain; 
+
+  /*while (temp) {
+    if (((i > j) && (k < i) && (k > j)) || ((i < j)) && (k < i))
+    {temp = temp->next; k++;}
+    else if ((i < j) && (k > j)) break;*/
+  
+  
+  n = chain_length(edge_chain);   if (i > j) j = j + n;
+  while (k <= j) {
+    if (k < i) {
+      temp = temp->next; k++;
+      if (k == n) temp = edge_chain;
+    }
+    else {
+      if (k == i) start = temp;
+      if (k == j) last = temp;
+      temp = temp->next; k++;
+      if (k == n) temp = edge_chain;
+    }
+  }
+  
+  radius = xc = yc = 0; 
+  /* constrain the fitted circle to pass through the endpoints */
+  x1 = start->x; y1 = start->y; x2 = last->x; y2 = last->y;
+  r1 = x1*x1 + y1*y1; r2 = x2*x2 + y2*y2;
+  
+  
+  k = 0; temp = edge_chain; len = 0; len3 = 0;
+  sx = sy = sx2 = sy2 = sxy = sx3 = sy3 = sx2_y = sy2_x = 0.0;
+  /*while (temp) {
+    if (((i > j) && (k < i) && (k > j)) || ((i < j)) && (k < i))
+    {temp = temp->next; k++;}
+    else if ((i < j) && (k > j)) break;*/
+  
+  n = chain_length(edge_chain);   if (i > j) j = j + n;
+  while (k <= j) {
+    if (k < i) {
+      temp = temp->next; k++;
+      if (k == n) temp = edge_chain;
+    }
+    else {
+      x3 = temp->x; y3 = temp->y;
+      sx += x3; sy += y3; sx2 += x3*x3; sy2 += y3*y3; len3++;
+      sxy += x3 * y3;   sx3 += x3*x3*x3;   sy3 += y3*y3*y3; 
+      sx2_y += x3*x3*y3;    sy2_x += y3*y3*x3;
+      d = - determinant_3x3(r1, y1, 1, r2, y2, 1, (x3*x3 + y3*y3), y3, 1);
+      e = determinant_3x3(r1, x1, 1, r2, x2, 1, (x3*x3 + y3*y3), x3, 1);
+      f = - determinant_3x3(r1, x1, y1, r2, x2, y2, (x3*x3 + y3*y3), x3, y3);
+      scale = determinant_3x3(x1, y1, 1, x2, y2, 1, x3, y3, 1);
+      if (fabs(scale) >   0.00001) {
+        d = d/scale; e = e/scale; f = f/scale;
+	if ((0.25*d*d + 0.25*e*e - f) > 0) { 
+	  len++; xc += -0.5*d; yc+= -0.5*e;
+	  radius += sqrt(0.25*d*d + 0.25*e*e - f);
+	}
+	/*else {
+          fprintf (stderr, "\n Warning:(%f %f)(%f %f)(%f %f) %f %f %f %f %f", 
+	  x1, y1, x2, y2, x3, y3, d, e, f, scale,
+	  0.25*d*d + 0.25*e*e - f);
+	  }*/
+      }
+      temp = temp->next; k++;
+      if (k == n) temp = edge_chain;
+    }
+  }
+  
+  a00 = sx2/len3; a01 = sxy/len3; a02 = sx/len3; a10 = sxy/len3; 
+  a11 = sy2/len3; a12 = sy/len3;  a20 = sx/len3; a21 = sy/len3; 
+  a22 = 1.0; b1 = - (sx3 + sy2_x)/len3;
+  b2 = - (sx2_y + sy3)/len3; b3 = - (sx2 + sy2)/len3;
+  ia00 = a11*a22 - a12*a21; ia10 = a12*a20 - a10*a22;
+  ia20 = a10*a21 - a11*a20; ia01 = a02*a21 - a01*a22;
+  ia11 = a00*a22 - a02*a20; ia21 = a01*a20 - a00*a21;
+  ia02 = a01*a12 - a02*a11; ia12 = a02*a10 - a00*a12;
+  ia22 = a00*a11 - a01*a10;
+  det = (a00*(a11*a22 - a12*a21) + a01*(a12*a20 - a10*a22) 
+	 + a02*(a10*a21 - a11*a20));
+  if ((fabs(det) >  0.00001)) {
+    ia00 = ia00/det; ia01 = ia01/det; ia02 = ia02/det;
+    ia10 = ia10/det; ia11 = ia11/det; ia12 = ia12/det;
+    ia20 = ia20/det; ia21 = ia21/det; ia22 = ia22/det;
+    xc_2 =(float)( -0.5 * (ia00*b1 + ia01*b2 + ia02*b3));
+    yc_2 =(float)(-0.5 * (ia10*b1 + ia11*b2 + ia12*b3));
+    c = (float) (ia20*b1 + ia21*b2 + ia22*b3);
+    if ((xc_2*xc_2 + yc_2*yc_2 - c) < 0.0) {
+      r_2 = 99999;}
+    else {
+      r_2 = sqrt(xc_2*xc_2 + yc_2*yc_2 - c);
+    }
+  }
+  else {
+    xc_2 = yc_2 = r_2 = 0.0;
+  }
+  
+  if (len == 0) error = 999999.0;
+  else {
+    radius = radius/len; xc = xc/len; yc = yc/len;
+    error = 0.0;
+  }
+  
+  /*xc_2 = sx/len3; yc_2 = sy/len3;
+    r_2 = sqrt((sx2 + sy2 - (2*(sx*xc_2 + sy*yc_2)))/
+    len3 + xc_2*xc_2 + yc_2*yc_2);*/
+  
+  error_2 = 0.0;
+  k = 0; temp = edge_chain;  len2 = 0;
+  n = chain_length(edge_chain);   if (i > j) j = j + n;
+  while (k <= j) {
+    if (k < i) {
+      temp = temp->next; k++;
+      if (k == n) temp = edge_chain;
+    }
+    else {
+      if (len2 == len3/2) {
+	x3 = temp->x; y3 = temp->y; /* get a point in the middle of the
+				       chain to infer the sense of the
+				       curve*/
+      }
+      error += (fabs(sqrt((temp->x - xc)*(temp->x - xc) +
+			  (temp->y - yc)*(temp->y - yc)) - radius)*
+		fabs(sqrt((temp->x - xc)*(temp->x - xc) +
+			  (temp->y - yc)*(temp->y - yc)) - radius));
+      error_2 += (fabs(sqrt((temp->x - xc_2)*(temp->x - xc_2) +
+			    (temp->y - yc_2)*(temp->y - yc_2)) - r_2) *
+		  fabs(sqrt((temp->x - xc_2)*(temp->x - xc_2) +
+			    (temp->y - yc_2)*(temp->y - yc_2)) - r_2));
+      temp = temp->next; k++; len2++;
+      if (k == n) temp = edge_chain;
+    }
+  }
+  error = sqrt(error); error_2 = sqrt(error_2);
+  
+  /*if (display_flag) 
+    fprintf (stderr, "\n        [xc %f yc %f r %f %f][xc %f yc %f r %f %f] ",
+    xc, yc, radius, error, xc_2, yc_2, r_2, error_2);*/
+  
+  if (error_2 < error) {
+    error = error_2;
+    radius = r_2; xc = xc_2; yc = yc_2;
+  }
+  (*type)->x = sense ((float) start->x, (float) start->y, xc, yc, x3, y3);
+
+  if ((error > 999.0) /*|| (radius > 200.0)*/) {
+    (*type)->x = 9999999.0; (*type)->y = 0; (*type)->next->x = 0;
+    (*type)->next->y = 0;
+    return(999999.0);
+  }
+  else {
+    (*type)->x = (*type)->x * (int) radius; 
+    (*type)->next->x = (int) xc; (*type)->next->y = (int) yc;
+    /*fprintf(stderr, "\n Circle param: r: %d xc: %d yc: %d start(%d %d) (%d %d) end(%d %d) (%d %d)", (*type)->x, (*type)->next->x, (*type)->next->y, start->x, start->y, (int) x3, (int) y3,  last->x, last->y, i, j);*/
+    return (error);
+  }
+}
+
+/************************************************************************/
+
+float get_farthest (Element *edge_chain, int i, int j, int *index)
+{
+  double m, c, dis, max_d, cos_a, sin_a, p, len;
+  int k, n;
+  Element *temp, *last, *start;
+
+  *index = i;  max_d = 0;
+  if (chain_length (edge_chain) > 2) {
+    k = 0; temp = edge_chain; 
+    /*while (temp) {
+      if (((i > j) && (k < i) && (k > j)) || ((i < j)) && (k < i))
+      {temp = temp->next; k++;}
+      else if ((i < j) && (k > j)) break;*/
+    
+    n = chain_length(edge_chain);   if (i > j) j = j + n;
+    while (k <= j) {
+      if (k < i) {
+	temp = temp->next; k++;
+	if (k == n) temp = edge_chain;
+      }
+      else {
+        if (k == i) start = temp;
+        if (k == j) last = temp;
+        temp = temp->next; k++;
+	if (k == n) temp = edge_chain;
+      }
+    }
+    /* getting line parameters joining the end points */
+    
+    if ((start->x - last->x) == 0) {
+      m = 9999999.0; c = ((start->y * last->x - start->x * last->y) /
+                          (start->y - last->y));
+    }
+    else {
+      m = (start->y - last->y) / (start->x - last->x);
+      c = ((start->x * last->y - start->y * last->x) /
+           (start->x - last->x));
+    }
+    sin_a = ((float) (last->x - start->x)/
+             (sqrt((float) (start->x - last->x)*(start->x - last->x) +
+                   (start->y - last->y)*(start->y - last->y))));
+
+    cos_a = ((float) (start->y - last->y)/
+             (sqrt((float) (start->x - last->x)*(start->x - last->x) +
+                   (start->y - last->y)*(start->y - last->y))));
+    
+    p = ((float) (start->x * last->y - start->y * last->x)/
+         (sqrt((float) (start->x - last->x)*(start->x - last->x) +
+               (start->y - last->y)*(start->y - last->y))));
+        
+    len =  (sqrt((float) (start->x - last->x)*(start->x - last->x) +
+		 (start->y - last->y)*(start->y - last->y)));
+    /* computing the distance */
+    k = 0; temp = edge_chain; 
+    /*while (temp) {
+      if (((i > j) && (k < i) && (k > j)) || ((i < j)) && (k < i))
+      {temp = temp->next; k++;}
+      else if ((i < j) && (k > j)) break;*/
+    
+    n = chain_length(edge_chain);   if (i > j) j = j + n;
+    while (k <= j) {
+      if (k < i) {
+	temp = temp->next; k++;
+	if (k == n) temp = edge_chain;
+      }
+      else {
+        /*if (m < 999999.0) 
+          dis = fabs (temp->y - m * temp->x - c) / sqrt(1+m*m);
+          else
+          dis = fabs (temp->x - c);
+          */
+	dis = fabs(temp->y * sin_a + temp->x * cos_a + p);
+	/*dis = sqrt((temp->x - (start->x + last->x)/2) * 
+	  (temp->x - (start->x + last->x)/2) + 
+	  (temp->y - (start->y + last->y)/2) * 
+	  (temp->y - (start->y + last->y)/2));*/
+	dis = fabs((sqrt((float) (temp->x - last->x)*(temp->x - last->x) +
+			 (temp->y - last->y)*(temp->y - last->y))) + 
+		   (sqrt((float) (start->x - temp->x)*(start->x - temp->x) +
+			 (start->y - temp->y)*(start->y - temp->y))) -
+		   len);
+	
+        if (dis > max_d) { max_d = dis; *index = k;}
+        temp = temp->next; k++; 
+	if (k == n) temp = edge_chain;
+      }
+    }
+  }
+  
+  if (display_flag)
+    fprintf(stderr, "\n       [i= %d (%d %d) j= %d (%d %d) k= %d %f]", 
+	    i, start->x, start->y, j, last->x, last->y, *index, max_d);
+  return (max_d);
+}
+/*************************************************************************/
+int get_candidate_points (Element *input, int i1, int i2, 
+                          int *output)
+{
+  int k, i;
+
+  if (get_farthest (input, i1, i2, &k) > MIN_DISTANCE) {
+    if (abs(i1 - k) > MIN_SEG_LENGTH) 
+      get_candidate_points(input, i1, k, output);
+    i = 0; while (output[i] >= 0) i++; /* get the first empty spot */
+    output[i] = k; 
+    if (abs(k - i2) > MIN_SEG_LENGTH)
+      get_candidate_points(input, k, i2, output);
+  }
+}
+
+/*************************************************************************/
+int greater (float x, float y)
+{
+  if (x < -99999.0) return (1);
+  else if (y < -99999.0) return(0);
+  else return(x >= y);
+}
+/*************************************************************************/
+float my_sum (float x, float y)
+{
+  if ((x < -99999.0) || (y < -99999.0)) return(-9999999.0);
+  else return(x + y);
+}
+/************************************************************************/
+  
+void display_path (int path[50][50], int i, int j, int flag, 
+                  struct int_list **min_p)
+{
+  if ((path[i][j] < 10000) && ((flag == 0) ||(i != j))) {
+    if (flag == 0) flag = 1;
+    append_element(min_p, path[i][j]);
+    display_path(path, path[i][j], j, flag, min_p);
+  }
+}
+ 
+/*************************************************************************/
+ 
+void display_fmat (float adj[50][50], int n)
+{
+  int i, j;
+
+  for (i=0; i < n; i++) {
+    fprintf(stderr, "\n");
+    for (j=0; j < n; j++) 
+      fprintf(stderr, " %5.3f", adj[i][j]);
+  }
+}
+         
+/*************************************************************************/
+ 
+void display_mat (int adj[50][50], int n)
+{
+  int i, j;
+
+  for (i=0; i < n; i++) {
+
+   fprintf(stderr, "\n");
+    for (j=0; j < n; j++) 
+      fprintf(stderr, " %d", adj[i][j]);
+  }
+}
+              
+/*************************************************************************/
+float shortest_cycle (float adjacency[50][50], int n, 
+                      struct int_list **vertices, int closed_p)
+{
+  int path[50][50], i, j, k;
+  float min_value;
+  struct int_list *min_path;
+  
+  for (i=0; i < n; i++)
+    for (j=0; j < n; j++)
+      if (adjacency[i][j] > -9999999.0)
+        path[i][j] = j;
+      else 
+        path[i][j] = 100000;
+  /*fprintf(stderr, " Adjacency mat:");
+    display_fmat(adjacency, n);*/
+  
+  for (k=0; k < n; k++)
+    for (i=0; i < n; i++)
+      if (adjacency[i][k] > -9999999.0)
+        for (j=0; j < n; j++)
+          if (greater (adjacency[i][j], 
+                       my_sum(adjacency[i][k], adjacency[k][j])) == 1) {
+            adjacency[i][j] = my_sum(adjacency[i][k], adjacency[k][j]);
+            path[i][j] = path[i][k];
+          }
+  min_value = 9999999.0; *vertices = min_path = NULL;
+  /*fprintf(stderr, " Adjacency mat:");
+    display_fmat(adjacency, n);*/
+
+  /*fprintf(stderr, " Path mat:");
+    display_mat(path, n);*/
+
+  if (closed_p == 1) {
+    for (i=0; i < n; i++) {
+      min_path = NULL;
+      display_path(path, i, i, 0, &min_path);
+      /*if (min_path) append_element(&min_path, min_path->value);*/
+      if (length(min_path) == 0) {
+        fprintf(stderr, " Adjacency mat:");
+        display_fmat(adjacency, n);
+        fprintf(stderr, " Path mat:");
+        display_mat(path, n);
+      }
+      cons_element(&min_path, i);
+
+      if (greater(min_value, adjacency[i][i]/*/(length(min_path)  - 1)*/) == 1) {
+        min_value =  adjacency[i][i]/*/(length(min_path) - 1)*/;
+        *vertices = min_path;
+        min_path = NULL;
+      }
+      else delete_list(min_path);
+      
+    }
+  }
+  else {
+    display_path(path, 0, n-1, 1, &min_path);
+    cons_element(&min_path, 0);
+    /*if (min_path) append_element(&min_path, min_path->value);*/
+    min_value =  adjacency[0][n-1]/*/(length(min_path) - 1)*/;
+    *vertices = min_path;
+    min_path = NULL;
+  }
+  delete_list(min_path);
+  
+  /*if (min_value > ACCPT_ERROR) {
+    delete_list (*vertices);
+    *vertices = NULL;
+    return(900.0);
+    }*/
+  
+  return(min_value);
+}
+/*************************************************************************/
+float adjacency[MAX_SEGS_PER_CHAIN][MAX_SEGS_PER_CHAIN];
+Element *type[MAX_SEGS_PER_CHAIN][MAX_SEGS_PER_CHAIN];
+int candidate_points[MAX_SEGS_PER_CHAIN];
+
+
+void get_best_fit_mixed(Element *input, Int_list **output, 
+			Element **types_out, int num, int closed_p)
+{
+  float error1, error2, error3;
+  int n, i, j;
+  struct int_list *vertices, *temp;
+  
+  
+  for (i = 0; i < MAX_SEGS_PER_CHAIN; i++) candidate_points[i] = -1;
+  candidate_points[0] = 0;
+  if (chain_length(input) > MIN_SEG_LENGTH)
+    get_candidate_points(input, 0, chain_length(input)-1, candidate_points);
+  n = 0; while (candidate_points[n] >= 0) n++;
+  candidate_points[n++] = chain_length(input)-1; 
+  for (i=0; i < n; i++)
+    for (j=0; j < n; j++)
+     adjacency[i][j] = -9999999.0; 
+
+  for (i=0; i < n; i++)
+    for (j=0; j < n; j++) 
+      if (((j > i)|| (closed_p == 1))&& (i != j)) {
+
+        if (num == 0) 
+          adjacency[i][j] = get_fit_error_str(input, candidate_points[i],
+                                              candidate_points[j],
+                                              &(type[i][j]));
+        if (num == 1)
+          adjacency[i][j] = get_fit_error_cir(input,  candidate_points[i],
+                                              candidate_points[j],
+                                              &(type[i][j]));
+        if (num == 2) {
+          error1 = get_fit_error_str(input,  candidate_points[i],
+                                     candidate_points[j],
+                                     &(type[i][j]));
+          error2 = get_fit_error_cir(input,  candidate_points[i],
+                                     candidate_points[j],
+                                     &(type[i][j]));
+	  
+	  if (display_flag == 1) 
+	    fprintf(stderr, "\n (%d %d) st %f, cir %f", candidate_points[i],
+		    candidate_points[j], error1, error2);
+	  
+          if (error1 < error2) {
+            error2 = error1;
+            type[i][j]->x = 999999.0;
+	    type[i][j]->y = type[i][j]->next->x = type[i][j]->next->y = 0;
+          }
+          adjacency[i][j] = error2;
+        }
+	type[i][j]->curvature = adjacency[i][j]; /*store the fit error here*/
+	adjacency[i][j] += chain_length(input)/SEG_INDEX;
+        /*fprintf(stderr, "\n %d %d   %f ", i, j, adjacency[i][j]);*/
+      }
+  vertices = NULL;
+  error3 = shortest_cycle(adjacency, n, &vertices, closed_p);
+  /*print_list (vertices); fprintf(stderr, " \n"); print_list (vertices);*/
+
+  temp = vertices; *output = NULL; *types_out = NULL;
+  while (temp) {
+    append_element(output, candidate_points[temp->value]);
+     if (temp->next) {
+      insert_Element(types_out,  type[temp->value][temp->next->value]);
+      /*fprintf(stderr, "\n Circle param: r: %d xc: %d yc: %d)", type[temp->value][temp->next->value]->x, type[temp->value][temp->next->value]->next->x, type[temp->value][temp->next->value]->next->y);*/
+    }
+    temp = temp->next;
+  }
+  /*for (i=0; i < n; i++) 
+    append_element(output, candidate_points[i]);
+    fprintf(stderr, "\n : "); print_list(*output);*/
+}
+/*****************************************************************/
+int neighbor_8_p (int x1, int y1, int x2, int y2)
+{
+  if (max(abs(x1 - x2),abs(y1 - y2)) <= 1.0) {
+    return(1);
+  }
+  else
+    return(0);
+}
+/*****************************************************************/
+
+int extract (Element *edge_xy, int i, int j, int *sx, int *sy, int *ex,
+             int *ey, Element **output) 
+{
+  int k, n;
+  Element *last, *first;
+  
+  
+  k = 0; last = NULL; n = chain_length(edge_xy); first = edge_xy;
+  if (i > j)  {
+    j = j + n; /* wrap around */
+    /*fprintf(stderr, "(%d %d)", i, j);*/
+  }
+   
+  while (k <= j) {
+    /*fprintf(stderr, "%d ", k);
+      if (((i > j) && (k < i) && (k > j)) || ((i < j)) && (k < i))*/
+    if (k < i)
+      {edge_xy = edge_xy->next; 
+       k++;if (k == n) {edge_xy = first;}}
+    /*else if ((i < j) && (k > j)) break;*/
+    else {
+      if (*output) {
+        last->next = (Element *)malloc(sizeof(Element));
+        last = last->next;
+        last->x = edge_xy->x;       last->y = edge_xy->y;
+        last->next = NULL;
+      }
+      else {
+        *output = (Element *)malloc(sizeof(Element));
+        last = *output;
+        last->x = edge_xy->x;       last->y = edge_xy->y;
+        last->next = NULL;
+      }
+      
+      last->curvature = edge_xy->curvature;
+      last->dir = edge_xy->dir;
+      last->tan_dir = edge_xy->tan_dir;
+      last->slope = edge_xy->slope;
+      last->mag_plus = edge_xy->mag_plus;
+      last->mag_minus = edge_xy->mag_minus;
+      last->width_plus = edge_xy->width_plus;
+      last->width_minus = edge_xy->width_minus;
+      last->slope_ratio = edge_xy->slope_ratio;
+      last->grad_dir = edge_xy->grad_dir;
+      
+      if (k == i) {*sx = edge_xy->x; *sy = edge_xy->y;}
+      if (k == j) {*ex = edge_xy->x; *ey = edge_xy->y;}
+      edge_xy = edge_xy->next; k++;
+      if (k == n) {edge_xy = first;}
+
+    }
+  }
+  
+}
+
+/*****************************************************************/
+Chain *segment (Chain *edge_chain) 
+{
+  Chain *seg_chain, *temp, *output, *temp_o, *last;
+  struct int_list *segs, *temp1;
+  Element *temp2, *types;
+  int count, id;
+  
+  
+  display_main("Segmenting Edges...");
+  temp = edge_chain; last = output = NULL; id = 0; count = 0;
+  while (temp != NULL) {
+    if (temp->delete_p == 0) {
+
+/*      draw_edge (temp, AQUA);*/
+      segs = NULL;
+      if (id == -106) {
+	display_flag = 1;
+	fprintf(stderr, "\n %d", id);
+	print_chain (temp->start);
+      }
+      else display_flag = 0;
+      if (neighbor_8_p(temp->start_x, temp->start_y, temp->end_x, temp->end_y)){
+	/* checking to see if the countour is close or not */
+	get_best_fit_mixed(temp->start, &segs, &types, 2, 1);
+      }
+      else {
+	get_best_fit_mixed(temp->start, &segs, &types, 2, 0);
+      } 
+      temp1 = segs; temp2 = types;
+      while (temp1->next) {
+	
+	temp_o = (struct chain *)malloc(sizeof(Chain));
+	
+	temp_o->id = id++;
+	temp_o->start = NULL;
+	temp_o->fit_error = temp2->curvature;
+	temp_o->radius = temp2->x; temp2 = temp2->next;
+	temp_o->xc = temp2->x; temp_o->yc = temp2->y;
+	temp2 = temp2->next;
+	/*fprintf(stderr, "\n radius %f xc %f yc %f", temp_o->radius,
+	  temp_o->xc, temp_o->yc);*/
+	extract(temp->start, temp1->value, temp1->next->value, 
+		&temp_o->start_x, &temp_o->start_y,
+		&temp_o->end_x, &temp_o->end_y, &(temp_o->start));
+	
+	slstore(temp_o, &last, &output);
+	temp1 = temp1->next;
+      }
+      delete_list(segs);
+      delete_Elements (types);
+    }
+    temp = temp->next;
+  }
+  /*  temp = output;
+      while (temp) {
+      mark_point (temp->start_x, temp->start_y);
+      mark_point (temp->end_x, temp->end_y);
+      temp = temp->next;
+      }*/
+  display_main("Segmenting Edges...done");  
+  return(output);
+}
+

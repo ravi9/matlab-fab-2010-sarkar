@@ -1,0 +1,110 @@
+function Phi = NanodiskArray (X, Y, r, h, Input, InitialState)
+%
+%This function simulates the magnetic states of a collection of nanodisks
+%based on LLG equation adapted for circular disks. It is assumed that each
+%disk is single domain which an inplane magnetization vector. It does not
+%allow for vortex states. This is based on the equations derived in 
+%
+% NEED TO insert paper reference.
+%
+%X and Y: location of disks in nanometers
+%
+%r: radius of the disks
+%
+%h: thickness of the disks
+%
+%Input: input vector for each dot. length is same as the X and Y vector.
+%disks with input has the value of the phi(angle) and disks without input
+%has -10 as the corresponding value
+%
+%InitialState: Initial angles of each of disks. The state in the Input
+%vector, if indicated, supercedes the state indicated in this vector
+
+close all;
+% all spatial units are in r nanometers, i.e in terms of the dimensions of
+% the radius of the disks.
+gamma = 17.6e+9/(4*pi); %m/A/s gyromagnetic ratio
+alpha = 0.5; %dimensionless sampling constant
+M_o = 1e+5; %A/m magnetization
+% r = 25; %nm radius of the disks
+% h = 20; %nm thickness of the disks
+% gap = 10; %nm
+del_t = 1e-15; %seconds simulation time step
+C = gamma * M_o * h*del_t/(4 * r * alpha) ;
+C_e = 4*pi*(1e-7)*pi*M_o*M_o*r*h*h*(1e-8)/2 ;%units: 1e-19 J, distances normalized w.r.t radius, r
+%note these above constants are the actual constants divided by r^3. This is
+%done as we are working with normalized spatial distances, i.e. distances
+%are in terms of number of radii, r.
+
+
+%DiskToDiskDistance = (2*r + gap)/r; 
+
+X = X/r; Y = Y/r; %normalize distances.
+% %% hexagonal lattice
+% Y = [1:N]'*ones(1, N); X = ones(N, 1)*[1:N];
+% X = [X X+0.5]; Y = [Y Y + 0.5];
+% X = DiskToDiskDistance.*reshape (X, 2*N*N, 1); Y = DiskToDiskDistance.*reshape (Y, 2*N*N, 1);
+% %% Rectagular lattice
+% Y = [1:N]'*ones(1, N); X = ones(N, 1)*[1:N];
+% X = DiskToDiskDistance.*reshape (X, N*N, 1); Y = DiskToDiskDistance.*reshape (Y, N*N, 1);
+%% Line of cells
+%  Y = DiskToDiskDistance.*ones(N, 1); X = DiskToDiskDistance.*[1:N]';
+%% -------------------------------------
+
+N = size(X, 1);
+Phi = InitialState; %pi * (rand(N, 1)-0.5); % array of angles
+Phi(find(Input ~= -10)) = Input(find(Input ~= -10));
+FreeCells = find(Input == -10);
+%% First tried matlab ode code did not work. Need to study the details
+%% about the paramters needs more careful.
+% Tspan = [0 1e4*del_t]; % Solve from t=1 to t=5
+% options = odeset('InitialStep', del_t, 'MaxStep', 5*del_t);
+% [T fPhi] = ode45(@(t,y) dPhi (t, Phi, X, Y, N, C, C_e),Tspan, Phi, options); % Solve ODE
+% 
+% for i=1:size(T,1)
+%      subplot(1,2,1) ;plot(X, Y, 'o'); hold on; quiver(X, Y, sin(fPhi(i,:))', cos(fPhi(i,:))' ,0); hold off;
+%      Energy = Hamiltonian (fPhi(i,:)', X, Y, N, C_e);
+%      subplot(1,2,2) ; plot(T(i), Energy, 'o'); hold on;
+%      pause(0.01);
+% end;
+
+%Normalized distance between neighboring disks
+Steps = 1;
+while (Steps < 3002)
+    [DelPhi TotalEnergy] = dPhi (Steps, Phi, X, Y, N, C, C_e);
+    Phi (FreeCells)  = Phi (FreeCells) + DelPhi (FreeCells);
+    %if (rem(Steps, 100) == 0), Phi = Phi + (rand(N, 1)- 0.5); end;
+    if (rem(Steps, 200) == 1)
+        subplot(1,2,1); plot(X, Y, 'o');  hold on; plot(X(FreeCells), Y(FreeCells), 'ro');quiver(X, Y, sin(Phi), cos(Phi) ,0.2); hold off;
+        subplot(1,2,2) ; plot(Steps, TotalEnergy, '.'); hold on;
+        pause(0.0001);
+    end;
+    Steps = Steps + 1;
+end;
+   
+function [dPhi_dt Energy]= dPhi (t, Phi, X, Y, N, C, C_e)
+Energy = 0;
+for i=1:N
+    x = X - X(i); y = Y - Y(i);
+    H_x_i = (cos(Phi) .* (2.*x.^2 - y.^2) + 3 * sin(Phi).*(x .* y));
+    H_x = sum(H_x_i./((x.^2 + y.^2).^2.5+eps));
+    H_y_i = (sin(Phi) .* (2.*y.^2 - x.^2) + 3 * cos(Phi).*(x .* y));
+    H_y = sum(H_y_i./((x.^2 + y.^2).^2.5+eps));
+    dPhi_dt (i) = C * (sin(Phi(i)) * H_x - cos (Phi(i))*H_y);
+    Energy = Energy + C_e*(cos(Phi(i)) * H_x + sin (Phi(i))*H_y);
+    %fprintf(1, '\n H_x = %f, H_y = %f, C = %f, DelPhi(%d) = %f', H_x, H_y, C, i, dPhi_dt(i));
+end;
+dPhi_dt = dPhi_dt';
+
+%%  ------------------------------
+function Energy = Hamiltonian (Phi, X, Y, N, C_e)
+Energy = 0;
+for i=1:N
+    x = X - X(i); y = Y - Y(i);
+    H_x_i = (cos(Phi) .* (2.*x.^2 - y.^2) + 3 * sin(Phi).*(x .* y));
+    H_x = sum(H_x_i./((x.^2 + y.^2).^2.5+eps));
+    H_y_i = (sin(Phi) .* (2.*y.^2 - x.^2) + 3 * cos(Phi).*(x .* y));
+    H_y = sum(H_y_i./((x.^2 + y.^2).^2.5+eps));
+    Energy = Energy + C_e*(cos(Phi(i)) * H_x + sin (Phi(i))*H_y);
+    %fprintf(1, '\n H_x = %f, H_y = %f, C = %f, DelPhi(%d) = %f', H_x, H_y, C, i, DelPhi(i));
+end;

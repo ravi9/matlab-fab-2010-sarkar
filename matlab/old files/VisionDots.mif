@@ -1,0 +1,23 @@
+# MIF 1.1
+# material name:Cobalt(hcp)
+ms:1400E3
+a:30E-12
+k1:520E3
+anisotropy type:uniaxial
+anisotropy dir1:1 0 0
+anisotropy dir2:0 1 0
+demag type:constmag
+part height:225E-9
+part width:195E-9
+part thickness:50e-9
+part shape:mask VisionDots.bmp
+cell size:1e-9
+init mag:random
+base output filename:VisionDots
+log level:0
+randomizer seed:1
+user interaction level:1
+user report code:30
+converge mxh value:.0001
+randomizer seed:1
+field type:Tie 0 0.0 1 105e-9 115e-9 112e-9 115e-9 7e-9
